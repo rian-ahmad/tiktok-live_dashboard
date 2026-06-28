@@ -105,7 +105,3 @@ Hindari scraping yang melanggar Terms of Service atau privasi pengguna.
 - Tambahkan autentikasi atau rate-limiting jika digunakan multi-user.
 - Tambahkan fitur download csv/json.
 - Tambah filter komentar (moderasi/keyword) dan notifikasi real-time.
-
----
-Jika Anda ingin, saya dapat menambahkan contoh `requirements.txt` minimal atau
-menyusun langkah deploy Docker untuk aplikasi ini.
