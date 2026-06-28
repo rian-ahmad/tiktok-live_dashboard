@@ -132,7 +132,7 @@ def main():
     st.set_page_config(layout="wide", page_title="TikTok Live Analytics")
     init_state()
 
-    st.title(f"Dashboard Analitik Live TikTok: @{st.session_state.get('target_username', '')}")
+    st.title(f"Dashboard Analitik TikTok Live: @{st.session_state.get('target_username', '')}")
 
     with st.sidebar:
         st.header('Kontrol Scraper')
@@ -170,7 +170,7 @@ def main():
     latest_share = st.session_state.share_data[-1]['value'] if st.session_state.share_data else 0
 
     kpi_cols = st.columns(4)
-    kpi_cols[0].metric('Viewers', f"👤 {latest_viewer}")
+    kpi_cols[0].metric('Views', f"👁️ {latest_viewer}")
     kpi_cols[1].metric('Likes', f"❤️ {latest_like}")
     kpi_cols[2].metric('Comments', f"💬 {len(st.session_state.comment_data)}")
     kpi_cols[3].metric('Shares', f"🔗 {latest_share}")
@@ -178,7 +178,7 @@ def main():
     st.markdown("---")
 
     st.subheader("Tren Metrik")
-    st.markdown("---")
+    st.html("<hr>")
 
     plot_cols = st.columns(2)
 
@@ -198,6 +198,7 @@ def main():
 
     st.markdown("---")
     st.subheader("Komentar Terbaru")
+    st.html("<hr>")
     if st.session_state.comment_data:
         trimmed_comments = st.session_state.comment_data[-10:]
         for comment in reversed(trimmed_comments):

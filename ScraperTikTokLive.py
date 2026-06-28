@@ -122,12 +122,12 @@ class TikTokLiveScraper:
             Args:
                 event (CommentEvent): Objek event komentar.
             """
-            user = getattr(event, 'user', None)
+            user = self.target
             self.data_queue.put({
                 'type': 'comment',
                 'datetime': datetime.now(),
-                'nickname': getattr(user, 'nick_name', 'Unknown'),
-                'username': getattr(user, 'unique_id', ''),
+                'nickname': getattr(event.user, 'nick_name'),
+                'username': getattr(event.user, 'unique_id', ''),
                 'komentar': getattr(event, 'comment', '')
             })
 
