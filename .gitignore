@@ -15,4 +15,4 @@ env/
 
 .dockerignore
 
-dockerfile
+Dockerfile
