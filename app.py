@@ -73,7 +73,6 @@ def stop_scraper():
         scraper = st.session_state.scraper
         if scraper:
             scraper.stop()
-        # Beri waktu agar thread benar-benar berhenti
         time.sleep(2)
         st.rerun()
 
@@ -183,10 +182,10 @@ def main():
     plot_cols = st.columns(2)
 
     with plot_cols[0]:
-        fig_viewer = plot_metric(st.session_state.viewer_data, "Penonton", "Jumlah", 'cyan')
+        fig_viewer = plot_metric(st.session_state.viewer_data, "Views", "Jumlah", 'cyan')
         st.plotly_chart(fig_viewer, width='stretch')
 
-        fig_comment = plot_metric(st.session_state.comment_count_data, "Komentar", "Jumlah", 'green')
+        fig_comment = plot_metric(st.session_state.comment_count_data, "Comments", "Jumlah", 'green')
         st.plotly_chart(fig_comment, width='stretch')
 
     with plot_cols[1]:
