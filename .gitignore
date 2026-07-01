@@ -12,3 +12,5 @@ env/
 .git/
 .vscode/
 .streamlit/
+
+.gcloudignore
