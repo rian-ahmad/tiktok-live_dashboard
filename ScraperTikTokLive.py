@@ -1,22 +1,8 @@
 import asyncio
-import logging
 from datetime import datetime
-from TikTokLive import TikTokLiveClient
 from TikTokLive.client.logger import LogLevel
-from TikTokLive.events import ConnectEvent, CommentEvent, LikeEvent, SocialEvent, RoomUserSeqEvent
-
-class QueueLogHandler(logging.Handler):
-    def __init__(self, queue):
-        super().__init__()
-        self.queue = queue
-
-    def emit(self, record):
-        msg = self.format(record)
-        self.queue.put({
-            'type': 'log',
-            'datetime': datetime.fromtimestamp(record.created),
-            'message': msg
-        })
+from TikTokLive.events import ConnectEvent, CommentEvent, LikeEvent, SocialEvent, RoomUserSeqEvent, GiftEvent, DisconnectEvent
+from TikTokLive import TikTokLiveClient
 
 class TikTokLiveScraper:
     def __init__(self, target, data_queue, duration=600, delay=10):
@@ -47,16 +33,47 @@ class TikTokLiveScraper:
         self.client = TikTokLiveClient(unique_id=self.target)
         self.is_running = False
         self.loop = None
-        
-        # Konfigurasi logging untuk dikirim ke queue
-        log_handler = QueueLogHandler(self.data_queue)
-        formatter = logging.Formatter('%(message)s')
-        log_handler.setFormatter(formatter)
-        self.client.logger.addHandler(log_handler)
         self.client.logger.setLevel(LogLevel.INFO.value)
-        self.client.logger.propagate = False
 
         self._register_events()
+
+    async def _stopper(self):
+        """Tugas latar belakang untuk menghentikan scraper setelah durasi tertentu."""
+        for _ in range(int(self.duration)):
+            if not self.is_running:
+                # self._log("Stopper dihentikan lebih awal karena sinyal stop.")
+                self.data_queue.put({
+                    'type': 'logs',
+                    'datetime': datetime.now(),
+                    'message': "Menghentikan..."
+                })
+                break
+
+            await asyncio.sleep(1)
+
+        if self.is_running and self.client.connected:
+            self.data_queue.put({
+                'type': 'logs',
+                'datetime': datetime.now(),
+                'message': "Memutuskan koneksi..."
+            })
+
+            await self.client.disconnect()
+        self._register_events()
+    
+    
+    def _normalize_gift_quantity(self, event):
+        for attr in ("repeat_count", "gift", "diamond_count", "combo_count"):
+            value = getattr(event, attr, None)
+            if value is None:
+                continue
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError):
+                continue
+            if parsed > 0:
+                return parsed
+        return 1
 
     def _register_events(self):
         """
@@ -74,15 +91,24 @@ class TikTokLiveScraper:
             Args:
                 event (ConnectEvent): Objek event koneksi.
             """
-            self.client.logger.info(f"Terhubung ke @{event.unique_id}!")
-            for _ in range(int(self.duration)):
-                if not self.is_running:
-                    break
-                await asyncio.sleep(1)
             
-            if self.is_running and self.client.connected:
-                await self.client.disconnect()
+            self.data_queue.put({
+                'type': 'logs',
+                'datetime': datetime.now(),
+                'message': f"Berhasil terhubung ke @{event.unique_id}!"
+            })
+            asyncio.create_task(self._stopper())
 
+        @self.client.on(DisconnectEvent)
+        async def on_disconnect(event: DisconnectEvent):
+            """Menangani log saat koneksi terputus."""
+            
+            self.data_queue.put({
+                'type': 'logs',
+                'datetime': datetime.now(),
+                'message': f"Terputus dari TikTok live: {self.target}"
+            })
+            
         @self.client.on(RoomUserSeqEvent)
         async def on_viewer_update(event: RoomUserSeqEvent) -> None:
             """
@@ -92,6 +118,7 @@ class TikTokLiveScraper:
             Args:
                 event (RoomUserSeqEvent): Objek event urutan user di room.
             """
+            user = self.target
             self.data_queue.put({
                 'type': 'viewer',
                 'datetime': datetime.now(),
@@ -122,7 +149,7 @@ class TikTokLiveScraper:
             Args:
                 event (CommentEvent): Objek event komentar.
             """
-            user = self.target
+
             self.data_queue.put({
                 'type': 'comment',
                 'datetime': datetime.now(),
@@ -147,6 +174,19 @@ class TikTokLiveScraper:
                     'value': getattr(event, 'share_count', 0)
                 })
 
+        @self.client.on(GiftEvent)
+        async def on_gift(event: GiftEvent) -> None:
+            gift_quantity = self._normalize_gift_quantity(event)
+
+            self.data_queue.put({
+                'type': 'gift',
+                'datetime': datetime.now(),
+                'value': gift_quantity,
+                'gift_name': getattr(event, 'gift_name', None),
+                'nickname': getattr(getattr(event, 'user', None), 'nick_name', None),
+            })
+
+
     async def check_loop(self):
         """
         Secara terus-menerus memeriksa apakah user TikTok target sedang live.
@@ -157,19 +197,36 @@ class TikTokLiveScraper:
         while self.is_running:
             try:
                 if await self.client.is_live():
+                    # self._log(f'{self.target} sedang live! Menghubungkan...')
                     self.client.logger.info(f'{self.target} sedang live! Menghubungkan...')
+                    self.data_queue.put({
+                        'type': 'logs',
+                        'datetime': datetime.now(),
+                        'message': f"{self.target} sedang live! Menghubungkan..."
+                    })
                     await self.client.connect()
-                    self.client.logger.info(f'Tersammbung ke siaran TikTok: {self.target}')
                     break
                 
+                # self._log(f'{self.target} sedang tidak live. Mencoba lagi dalam {self.delay} detik.')
                 self.client.logger.info(f'{self.target} sedang tidak live. Mencoba lagi dalam {self.delay} detik.')
+                self.data_queue.put({
+                    'type': 'logs',
+                    'datetime': datetime.now(),
+                    'message': f"{self.target} sedang tidak live. Mencoba lagi dalam {self.delay} detik."
+                })
+                
                 for _ in range(int(self.delay)):
                     if not self.is_running:
                         break
                     await asyncio.sleep(1)
+
             except Exception as e:
-                self.client.logger.error(f"Error di check_loop: {e}")
-                # Tambahkan jeda sebelum mencoba lagi untuk menghindari spamming jika ada error koneksi
+                self.client.logger.warning(f"Error di check_loop: {e}")
+                self.data_queue.put({
+                    'type': 'logs',
+                    'datetime': datetime.now(),
+                    'message': f"{e}"
+                })
                 for _ in range(int(self.delay)):
                     if not self.is_running:
                         break
@@ -189,24 +246,23 @@ class TikTokLiveScraper:
         try:
             self.loop.run_until_complete(self.check_loop())
         except Exception as e:
+            # self._log(f"Scraper error: {e}")
             self.client.logger.error(f"Scraper error: {e}")
+
         finally:
             if self.loop.is_running():
                 self.loop.close()
 
     def stop(self):
         """
-        Menghentikan scraper TikTok Live.
-        Menyetel flag `is_running` ke `False` untuk menghentikan `check_loop`.
-        Jika scraper terhubung ke siaran langsung, ia akan terputus secara aman.
+        Memberi sinyal agar scraper berhenti. Dipanggil dari thread utama (Streamlit).
         """
+        if not self.is_running:
+            return
+
         self.is_running = False
+        self.client.logger.info("Scraping mulai berhenti. Menutup koneksi..")
+
         if self.loop and self.loop.is_running():
             if self.client.connected:
                 asyncio.run_coroutine_threadsafe(self.client.disconnect(), self.loop)
-            
-            # Beri waktu untuk loop event untuk memproses pemutusan
-            self.loop.call_soon_threadsafe(self.loop.stop)
-            self.client.logger.info(f"Terputus dari siaran TikTok: {self.target}")
-            self.loop.close()
-            self.loop = None

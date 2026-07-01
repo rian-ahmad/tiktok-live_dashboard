@@ -33,10 +33,14 @@ def init_state():
         st.session_state.comment_data = []
     if 'comment_count_data' not in st.session_state:
         st.session_state.comment_count_data = []
+    if 'gift_data' not in st.session_state:
+        st.session_state.gift_data = []
+    if 'gift_count_data' not in st.session_state:
+        st.session_state.gift_count_data = []
     if 'logs' not in st.session_state:
         st.session_state.logs = []
 
-def start_scraper(target: str):
+def start_scraper(target: str, duration: int=60):
     """Memulai thread scraper."""
     if not target:
         st.error('Masukkan username TikTok terlebih dahulu.')
@@ -52,10 +56,12 @@ def start_scraper(target: str):
     st.session_state.share_data = []
     st.session_state.comment_data = []
     st.session_state.comment_count_data = []
+    st.session_state.gift_data = []
+    st.session_state.gift_count_data = []
     st.session_state.logs = []
     st.session_state.data_queue = queue.Queue()
 
-    scraper = TikTokLiveScraper(target=target, data_queue=st.session_state.data_queue, duration=3600, delay=15)
+    scraper = TikTokLiveScraper(target=target, data_queue=st.session_state.data_queue, duration=duration, delay=15)
     thread = threading.Thread(target=scraper.start, daemon=True)
 
     st.session_state.scraper = scraper
@@ -69,11 +75,14 @@ def start_scraper(target: str):
 def stop_scraper():
     """Menghentikan thread scraper."""
     if st.session_state.get('is_running'):
-        st.session_state.is_running = False
         scraper = st.session_state.scraper
         if scraper:
             scraper.stop()
-        time.sleep(2)
+        
+        time.sleep(1.5) 
+
+        st.session_state.is_running = False
+        drain_queue()
         st.rerun()
 
 def drain_queue():
@@ -96,16 +105,32 @@ def drain_queue():
                     'datetime': ts,
                     'value': len(st.session_state.comment_data)
                 })
-            elif item_type == 'log':
+            elif item_type == 'gift':
+                gift_quantity = max(int(item.get('value', 1) or 1), 1)
+                st.session_state.gift_data.append({**item, 'value': gift_quantity})
+
+                total_gifts = sum(
+                    max(int(entry.get('value', 1) or 1), 1)
+                    for entry in st.session_state.gift_data
+                )
+
+                st.session_state.gift_count_data.append({
+                    'datetime': ts,
+                    'value': total_gifts
+                })
+            elif item_type == 'logs':
                 log_message = item.get('message', '')
-                st.session_state.logs.append(f"{ts.strftime('%H:%M:%S')} -> {log_message}")
+                st.session_state.logs.append({'datetime': ts, 'message': item.get('message', '')})
         except queue.Empty:
             break
 
     st.session_state.viewer_data = st.session_state.viewer_data[-500:]
     st.session_state.like_data = st.session_state.like_data[-500:]
     st.session_state.share_data = st.session_state.share_data[-500:]
+    st.session_state.comment_data = st.session_state.comment_data[-100:]
     st.session_state.comment_count_data = st.session_state.comment_count_data[-500:]
+    st.session_state.gift_data = st.session_state.gift_data[-500:]
+    st.session_state.gift_count_data = st.session_state.gift_count_data[-500:]
     st.session_state.logs = st.session_state.logs[-100:]
 
 def plot_metric(data, title, yaxis_title, color):
@@ -126,88 +151,114 @@ def plot_metric(data, title, yaxis_title, color):
     )
     return fig
 
+@st.fragment(run_every=1)
+def render_realtime():
+
+    if st.session_state.get('is_running'):
+        drain_queue()
+
+    latest_viewer = st.session_state.viewer_data[-1]['value'] if st.session_state.viewer_data else 0
+    latest_like = st.session_state.like_data[-1]['value'] if st.session_state.like_data else 0
+    latest_share = st.session_state.share_data[-1]['value'] if st.session_state.share_data else 0
+    latest_gift_count = st.session_state.gift_count_data[-1]['value'] if st.session_state.gift_count_data else 0
+
+
+    kpi_cols = st.columns(5)
+    kpi_cols[0].metric('Views', f"👁️ {latest_viewer}")
+    kpi_cols[1].metric('Likes', f"❤️ {latest_like}")
+    kpi_cols[2].metric('Comments', f"💬 {len(st.session_state.comment_data)}")
+    kpi_cols[3].metric('Shares', f"🔗 {latest_share}")
+    kpi_cols[4].metric('Gifts', f"🎁 {latest_gift_count}")
+
+
+    col_1, col_2 = st.columns([3, 1])
+    with col_1:
+        st.subheader("Tren Metrik", divider=True)
+
+        plot_cols = st.columns(2)
+
+        with plot_cols[0]:
+            fig_viewer = plot_metric(st.session_state.viewer_data, "Views", "Jumlah", 'cyan')
+            st.plotly_chart(fig_viewer, width='stretch')
+
+            fig_comment = plot_metric(st.session_state.comment_count_data, "Comments", "Jumlah", 'green')
+            st.plotly_chart(fig_comment, width='stretch')
+
+            fig_gift = plot_metric(st.session_state.gift_count_data, "Gifts", "Jumlah", 'red')
+            st.plotly_chart(fig_gift, width='stretch')
+
+        with plot_cols[1]:
+            fig_like = plot_metric(st.session_state.like_data, "Likes", "Jumlah", 'magenta')
+            st.plotly_chart(fig_like, width='stretch')
+
+            fig_share = plot_metric(st.session_state.share_data, "Shares", "Jumlah", 'gold')
+            st.plotly_chart(fig_share, width='stretch')
+
+    with col_2:
+        st.subheader("Komentar", divider=True)
+        if st.session_state.comment_data:
+            trimmed_comments = st.session_state.comment_data[-10:]
+            for comment in reversed(trimmed_comments):
+                st.text(f"**{comment['nickname']}**: {comment['komentar']}")
+        else:
+            st.text("Belum ada komentar.")
+    
+    st.divider()
+    with st.bottom:
+        with st.expander("Lihat Log Aktivitas"):
+            if st.session_state.logs:
+                log_entries = st.session_state.logs
+                formatted_messages = [f"{log['datetime'].strftime('%H:%M:%S')} -> {log['message']}" for log in reversed(log_entries)]
+                log_string = "\n".join(formatted_messages)
+                st.code(log_string, language="text")
+            else:
+                st.code("Belum ada log.", language="text", width="content")
+
+
 def main():
     """Fungsi utama untuk menjalankan aplikasi Streamlit."""
     st.set_page_config(layout="wide", page_title="TikTok Live Analytics")
     init_state()
 
     st.title(f"Dashboard Analitik TikTok Live: @{st.session_state.get('target_username', '')}")
+    st.divider()
 
     with st.sidebar:
-        st.header('Kontrol Scraper')
+        st.header('Kontrol Scraper', divider=True)
         target = st.text_input(
             'Username TikTok (unique_id)',
             value=st.session_state.get('target_username', ''),
             key='target_username_input'
         )
+        duration = st.number_input(
+            'Durasi Scraper (detik)',
+            min_value=10,
+            value=600,
+            step=10,
+            key='duration_input'
+        )
+
         target = (target or '').strip()
+        duration = int(duration)
 
         col1, col2 = st.columns(2)
         with col1:
             if st.button('Start', type='primary', width='stretch'):
-                start_scraper(target.strip())
+                start_scraper(target.strip(), duration)
         with col2:
             if st.button('Stop', width='stretch'):
                 stop_scraper()
-
-        st.markdown("---")
-        st.markdown("##### Log Aktivitas")
-        if st.session_state.logs:
-            log_text = "\n".join(reversed(st.session_state.logs))
-            st.text_area("Logs", value=log_text, height=400, disabled=True, key="logs_textarea")
+        
+        if st.session_state.get('is_running'):
+            st.success(f"Memantau @{st.session_state.target_username}...")
         else:
-            st.text("Belum ada log.")
+            st.info("Scraper tidak berjalan.")
 
-    if not st.session_state.get('is_running'):
+    if not st.session_state.get('target_username'):
         st.info("Masukkan username TikTok di sidebar dan klik 'Start' untuk memulai pemantauan.")
         return
 
-    drain_queue()
-    
-    latest_viewer = st.session_state.viewer_data[-1]['value'] if st.session_state.viewer_data else 0
-    latest_like = st.session_state.like_data[-1]['value'] if st.session_state.like_data else 0
-    latest_share = st.session_state.share_data[-1]['value'] if st.session_state.share_data else 0
-
-    kpi_cols = st.columns(4)
-    kpi_cols[0].metric('Views', f"👁️ {latest_viewer}")
-    kpi_cols[1].metric('Likes', f"❤️ {latest_like}")
-    kpi_cols[2].metric('Comments', f"💬 {len(st.session_state.comment_data)}")
-    kpi_cols[3].metric('Shares', f"🔗 {latest_share}")
-    
-    st.markdown("---")
-
-    st.subheader("Tren Metrik")
-    st.html("<hr>")
-
-    plot_cols = st.columns(2)
-
-    with plot_cols[0]:
-        fig_viewer = plot_metric(st.session_state.viewer_data, "Views", "Jumlah", 'cyan')
-        st.plotly_chart(fig_viewer, width='stretch')
-
-        fig_comment = plot_metric(st.session_state.comment_count_data, "Comments", "Jumlah", 'green')
-        st.plotly_chart(fig_comment, width='stretch')
-
-    with plot_cols[1]:
-        fig_like = plot_metric(st.session_state.like_data, "Likes", "Jumlah", 'magenta')
-        st.plotly_chart(fig_like, width='stretch')
-
-        fig_share = plot_metric(st.session_state.share_data, "Shares", "Jumlah", 'gold')
-        st.plotly_chart(fig_share, width='stretch')
-
-    st.markdown("---")
-    st.subheader("Komentar Terbaru")
-    st.html("<hr>")
-    if st.session_state.comment_data:
-        trimmed_comments = st.session_state.comment_data[-10:]
-        for comment in reversed(trimmed_comments):
-            st.markdown(f"**{comment['nickname']}**: {comment['komentar']}")
-    else:
-        st.text("Belum ada komentar.")
-
-
-    time.sleep(1)
-    st.rerun()
+    render_realtime()
 
 
 if __name__ == '__main__':
