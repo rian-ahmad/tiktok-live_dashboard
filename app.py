@@ -119,7 +119,6 @@ def drain_queue():
                     'value': total_gifts
                 })
             elif item_type == 'logs':
-                log_message = item.get('message', '')
                 st.session_state.logs.append({'datetime': ts, 'message': item.get('message', '')})
         except queue.Empty:
             break
@@ -197,11 +196,11 @@ def render_realtime():
     with col_2:
         st.subheader("Komentar", divider=True)
         if st.session_state.comment_data:
-            trimmed_comments = st.session_state.comment_data[-10:]
+            trimmed_comments = st.session_state.comment_data[-20:]
             for comment in reversed(trimmed_comments):
-                st.text(f"**{comment['nickname']}**: {comment['komentar']}")
+                st.markdown(f"**{comment['nickname']}**: {comment['komentar']}")
         else:
-            st.text("Belum ada komentar.")
+            st.markdown("Belum ada komentar.")
     
     st.divider()
     with st.bottom:

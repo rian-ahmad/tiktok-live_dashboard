@@ -12,7 +12,3 @@ env/
 .git/
 .vscode/
 .streamlit/
-
-.dockerignore
-
-Dockerfile

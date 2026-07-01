@@ -197,7 +197,6 @@ class TikTokLiveScraper:
         while self.is_running:
             try:
                 if await self.client.is_live():
-                    # self._log(f'{self.target} sedang live! Menghubungkan...')
                     self.client.logger.info(f'{self.target} sedang live! Menghubungkan...')
                     self.data_queue.put({
                         'type': 'logs',
@@ -207,7 +206,6 @@ class TikTokLiveScraper:
                     await self.client.connect()
                     break
                 
-                # self._log(f'{self.target} sedang tidak live. Mencoba lagi dalam {self.delay} detik.')
                 self.client.logger.info(f'{self.target} sedang tidak live. Mencoba lagi dalam {self.delay} detik.')
                 self.data_queue.put({
                     'type': 'logs',
@@ -246,7 +244,6 @@ class TikTokLiveScraper:
         try:
             self.loop.run_until_complete(self.check_loop())
         except Exception as e:
-            # self._log(f"Scraper error: {e}")
             self.client.logger.error(f"Scraper error: {e}")
 
         finally:
