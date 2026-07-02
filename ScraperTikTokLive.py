@@ -118,7 +118,6 @@ class TikTokLiveScraper:
             Args:
                 event (RoomUserSeqEvent): Objek event urutan user di room.
             """
-            user = self.target
             self.data_queue.put({
                 'type': 'viewer',
                 'datetime': datetime.now(),
