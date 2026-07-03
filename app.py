@@ -2,6 +2,7 @@ import queue
 import threading
 import time
 from datetime import datetime
+import os
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -9,7 +10,6 @@ import streamlit as st
 
 from ScraperTikTokLive import TikTokLiveScraper
 
-import os
 
 try:
     from dotenv import load_dotenv
@@ -18,7 +18,12 @@ except ImportError:
     pass
 
 def init_state():
-    """Menginisialisasi session state untuk menyimpan data aplikasi."""
+    """Inisialisasi state sesi aplikasi.
+
+    Membuat dan mengatur variabel session_state yang digunakan untuk
+    menyimpan antrean data, objek scraper, status eksekusi, serta data
+    visualisasi dan log real-time.
+    """
     if 'data_queue' not in st.session_state:
         st.session_state.data_queue = queue.Queue()
     if 'scraper' not in st.session_state:
@@ -30,26 +35,24 @@ def init_state():
     if 'target_username' not in st.session_state:
         st.session_state.target_username = ''
     
-    # Penyimpanan data untuk visualisasi
-    if 'viewer_data' not in st.session_state:
-        st.session_state.viewer_data = []
-    if 'like_data' not in st.session_state:
-        st.session_state.like_data = []
-    if 'share_data' not in st.session_state:
-        st.session_state.share_data = []
-    if 'comment_data' not in st.session_state:
-        st.session_state.comment_data = []
-    if 'comment_count_data' not in st.session_state:
-        st.session_state.comment_count_data = []
-    if 'gift_data' not in st.session_state:
-        st.session_state.gift_data = []
-    if 'gift_count_data' not in st.session_state:
-        st.session_state.gift_count_data = []
-    if 'logs' not in st.session_state:
-        st.session_state.logs = []
+    data_value = [
+        'viewer_data', 'like_data', 'share_data', 'comment_data',
+        'comment_count_data', 'gift_data', 'gift_count_data', 'logs'
+    ]
+
+    if not all(key in st.session_state for key in data_value):
+        for key in data_value:
+            st.session_state[key] = []
+    
+    st.session_state.on_run = False
 
 def start_scraper(target: str, duration: int=60):
-    """Memulai thread scraper."""
+    """Memulai proses scraping TikTok Live.
+
+    Args:
+        target: Username TikTok target yang akan dipantau.
+        duration: Durasi scraping dalam detik sebelum proses dihentikan.
+    """
     if not target:
         st.error('Masukkan username TikTok terlebih dahulu.')
         return
@@ -81,20 +84,22 @@ def start_scraper(target: str, duration: int=60):
     st.rerun()
 
 def stop_scraper():
-    """Menghentikan thread scraper."""
+    """Menghentikan proses scraping yang sedang berjalan."""
     if st.session_state.get('is_running'):
         scraper = st.session_state.scraper
         if scraper:
             scraper.stop()
-        
-        time.sleep(1.5) 
-
+        time.sleep(1.5)
         st.session_state.is_running = False
         drain_queue()
         st.rerun()
 
 def drain_queue():
-    """Mengambil data dari queue dan memperbarui session state."""
+    """Mengambil data dari antrean dan memperbarui state sesi.
+
+    Data yang diterima dari scraper diproses dan disimpan ke daftar yang
+    digunakan untuk visualisasi serta tampilan log dan komentar.
+    """
     while not st.session_state.data_queue.empty():
         try:
             item = st.session_state.data_queue.get_nowait()
@@ -141,14 +146,31 @@ def drain_queue():
     st.session_state.logs = st.session_state.logs[-100:]
 
 def plot_metric(data, title, yaxis_title, color):
-    """Membuat chart Plotly untuk metrik."""
+    """Membuat grafik Plotly untuk suatu metrik.
+
+    Args:
+        data: Daftar data titik metrik yang akan divisualisasikan.
+        title: Judul grafik yang ditampilkan.
+        yaxis_title: Label sumbu vertikal grafik.
+        color: Warna garis yang digunakan pada grafik.
+
+    Returns:
+        go.Figure: Objek grafik Plotly yang siap ditampilkan.
+    """
     if not data:
         fig = go.Figure()
     else:
         df = pd.DataFrame(data)
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['datetime'], y=df['value'], mode='lines', name=yaxis_title, line=dict(color=color)))
-    
+        fig.add_trace(
+            go.Scatter(
+                x=df['datetime'], 
+                y=df['value'], 
+                mode='lines', 
+                name=yaxis_title, 
+                line=dict(color=color
+            ))
+        )
     fig.update_layout(
         title=title,
         xaxis_title="Waktu",
@@ -158,24 +180,32 @@ def plot_metric(data, title, yaxis_title, color):
     )
     return fig
 
-@st.fragment(run_every=1)
+@st.fragment(run_every=st.session_state.get('on_run'))
 def render_realtime():
+    """Merender antarmuka real-time untuk dashboard analitik TikTok Live.
 
+    Fungsi ini mengambil data terbaru dari antrean saat scraper berjalan,
+    menampilkan metrik utama dalam bentuk KPI, membuat grafik tren untuk
+    berbagai metrik, menampilkan komentar terbaru, dan memuat log program.
+    """
+    
     if st.session_state.get('is_running'):
         drain_queue()
 
     with st.container():
-        latest_viewer = st.session_state.viewer_data[-1]['value'] if st.session_state.viewer_data else 0
-        latest_like = st.session_state.like_data[-1]['value'] if st.session_state.like_data else 0
-        latest_share = st.session_state.share_data[-1]['value'] if st.session_state.share_data else 0
-        latest_gift_count = st.session_state.gift_count_data[-1]['value'] if st.session_state.gift_count_data else 0
+        live_data = {
+            "latest_viewer": st.session_state.viewer_data[-1]['value'] if st.session_state.viewer_data else 0,
+            "latest_like": st.session_state.like_data[-1]['value'] if st.session_state.like_data else 0,
+            "latest_share": st.session_state.share_data[-1]['value'] if st.session_state.share_data else 0,
+            "latest_gift_count": st.session_state.gift_count_data[-1]['value'] if st.session_state.gift_count_data else 0    
+        }
 
         kpi_cols = st.columns(5)
-        kpi_cols[0].metric('Views', f"👁️ {latest_viewer}")
-        kpi_cols[1].metric('Likes', f"❤️ {latest_like}")
+        kpi_cols[0].metric('Views', f"👁️ {live_data['latest_viewer']}")
+        kpi_cols[1].metric('Likes', f"❤️ {live_data['latest_like']}")
         kpi_cols[2].metric('Comments', f"💬 {len(st.session_state.comment_data)}")
-        kpi_cols[3].metric('Shares', f"🔗 {latest_share}")
-        kpi_cols[4].metric('Gifts', f"🎁 {latest_gift_count}")
+        kpi_cols[3].metric('Shares', f"🔗 {live_data['latest_share']}")
+        kpi_cols[4].metric('Gifts', f"🎁 {live_data['latest_gift_count']}")
 
         col_1, col_2 = st.columns([4, 2], border=True, gap="xxsmall")
         with col_1:
@@ -185,43 +215,51 @@ def render_realtime():
             st.plotly_chart(fig_viewer, width='stretch')
             st.divider()
 
-            row_1_col = st.columns(2, border=True, gap="xsmall")
-            with row_1_col[0]:
-                fig_comment = plot_metric(st.session_state.comment_count_data, "Comments", "Jumlah", 'green')
-                st.plotly_chart(fig_comment, width='stretch')
-            with row_1_col[1]:
-                fig_like = plot_metric(st.session_state.like_data, "Likes", "Jumlah", 'magenta')
-                st.plotly_chart(fig_like, width='stretch')
+            fig_comment = plot_metric(st.session_state.comment_count_data, "Comments", "Jumlah", 'green')
+            st.plotly_chart(fig_comment, width='stretch')
+            st.divider()
 
-            row_2_col = st.columns(2, border=True, gap="xsmall")
-            with row_2_col[0]:
-                fig_gift = plot_metric(st.session_state.gift_count_data, "Gifts", "Jumlah", 'red')
-                st.plotly_chart(fig_gift, width='stretch')
-            with row_2_col[1]:
-                fig_share = plot_metric(st.session_state.share_data, "Shares", "Jumlah", 'gold')
-                st.plotly_chart(fig_share, width='stretch')
+            fig_like = plot_metric(st.session_state.like_data, "Likes", "Jumlah", 'magenta')
+            st.plotly_chart(fig_like, width='stretch')
+            st.divider()
+            
+            fig_gift = plot_metric(st.session_state.gift_count_data, "Gifts", "Jumlah", 'red')
+            st.plotly_chart(fig_gift, width='stretch')
+            st.divider()
+            
+            fig_share = plot_metric(st.session_state.share_data, "Shares", "Jumlah", 'gold')
+            st.plotly_chart(fig_share, width='stretch')
 
         with col_2:
             st.subheader("Komentar", divider=True)
             if st.session_state.comment_data:
-                trimmed_comments = st.session_state.comment_data[-20:]
+                trimmed_comments = st.session_state.comment_data[-10:]
                 for comment in reversed(trimmed_comments):
-                    st.markdown(f"**{comment['nickname']}**: {comment['komentar']}")
+                    with st.chat_message(name=f"{comment['nickname']}"):
+                        st.text(f"{comment['nickname']}:\n{comment['komentar']}")
+                        # st.text(comment['komentar'])
             else:
-                st.markdown("Belum ada komentar.")
+                st.text("Belum ada komentar.")
     
     with st.bottom:
         with st.expander("Log Program"):
             if st.session_state.logs:
                 log_entries = st.session_state.logs
-                formatted_messages = [f"{log['datetime'].strftime('%H:%M:%S')} -> {log['message']}" for log in reversed(log_entries)]
+                formatted_messages = [
+                    f"{log['datetime'].strftime('%H:%M:%S')} -> {log['message']}" for log in reversed(log_entries)
+                ]
                 log_string = "\n".join(formatted_messages)
                 st.code(log_string, language="text")
             else:
                 st.code("Belum ada log.", language="text")
 
 def streamlit_app():
-    """Fungsi utama untuk menjalankan aplikasi Streamlit."""
+    """Menjalankan aplikasi Streamlit utama.
+
+    Fungsi ini menginisialisasi state sesi, menyiapkan antarmuka pengguna,
+    menerima input username dan durasi scraping dari sidebar, serta
+    mengelola alur mulai dan berhenti scraper.
+    """
     init_state()
 
     st.title(f"Dashboard Analitik TikTok Live: @{st.session_state.get('target_username', '')}")
@@ -231,8 +269,8 @@ def streamlit_app():
         st.header('Kontrol Scraper', divider=True)
         st.warning(
             icon=":material/warning:",
-            title="PERINGATAN", 
-            body="Pastikan target valid, dan cek log"
+            title="PERINGATAN",
+            body="Pastikan id user TikTok valid, dan cek log"
         )
         target = st.text_input(
             'Username TikTok (unique_id)',
@@ -253,13 +291,13 @@ def streamlit_app():
         col1, col2 = st.columns(2)
         with col1:
             if st.button('Start', type='primary', width='stretch'):
+                st.session_state.on_run = 1
                 start_scraper(target.strip(), duration)
         with col2:
             if st.button('Stop', width='stretch'):
                 stop_scraper()
-        
         if st.session_state.get('is_running'):
-            st.success(f"Scraper sedang berjalan.")
+            st.success("Scraper sedang berjalan.")
         else:
             st.info("Scraper tidak berjalan.")
 
@@ -271,25 +309,34 @@ def streamlit_app():
 
 
 def main():
-    """Fungsi utama untuk menjalankan aplikasi Streamlit."""
+    """Entry point utama aplikasi.
+
+    Fungsi ini mengatur konfigurasi halaman, menampilkan dialog PIN
+    saat akses dibatasi, dan memanggil aplikasi utama setelah autentikasi
+    berhasil.
+    """
     st.set_page_config(layout="wide", page_title="TikTok Live Analytics")
 
-    CORRECT_PIN = os.getenv('PIN')
+    correct_pin = os.getenv('PIN')
 
     @st.dialog(icon=":material/lock:", dismissible=False, title="LOCKED")
     def pin_dialog():
+        """Menampilkan dialog untuk verifikasi PIN akses aplikasi.
+
+        Pengguna diminta memasukkan PIN sebelum dapat mengakses dashboard.
+        Jika PIN salah, pesan kesalahan ditampilkan dan pengguna dapat
+        mencoba kembali.
+        """
         with st.form("pin_form"):
             input_pin = st.text_input(label="PIN Akses:", type="password")
             submit_button = st.form_submit_button("Submit")
-            
-            if "pin_input" in st.session_state and st.session_state.pin_input != CORRECT_PIN:
+            if "pin_input" in st.session_state and st.session_state.pin_input != correct_pin:
                 st.error("PIN salah! Silakan coba lagi.")
-                
             if submit_button:
                 st.session_state.pin_input = input_pin
                 st.rerun()
 
-    if st.session_state.get("pin_input", "") != CORRECT_PIN:
+    if st.session_state.get("pin_input", "") != correct_pin:
         pin_dialog()
     else:
         streamlit_app()
